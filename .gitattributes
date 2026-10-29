@@ -1,0 +1,26 @@
+# GhostArchive — Git line ending normalization
+# Normalize all text files to LF in the repository
+* text=auto eol=lf
+
+# Force specific types
+*.md  text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.gguf binary
+*.bin binary
+*.safetensors binary

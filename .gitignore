@@ -1,0 +1,133 @@
+# =============================================================================
+# GhostArchive — .gitignore
+# =============================================================================
+# Local-first privacy: never commit runtime data, secrets, or personal content.
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environments — never commit
+venv/
+.venv/
+env/
+.env_python/
+
+# ── Environment / Secrets ─────────────────────────────────────────────────────
+# .env.example IS committed (safe defaults, no real secrets)
+.env
+.env.local
+.env.*.local
+*.secret
+
+# ── Local data directory — CRITICAL: never commit user documents or indexes ───
+backend/data/
+data/local/
+
+# SQLite databases (runtime state)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# ChromaDB vector store (large binary index, rebuildable from SQLite)
+chroma_store/
+chroma_db/
+**/chroma_store/
+**/chroma_db/
+
+# Uploaded / imported user files (personal documents)
+backend/data/files/
+backend/data/uploads/
+
+# ── Model files — large binary weights, download separately ──────────────────
+*.bin
+*.gguf
+*.ggml
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.tflite
+# Hugging Face model cache
+.cache/huggingface/
+models/
+
+# ── Node.js / Frontend ────────────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Build output
+frontend/dist/
+frontend/build/
+*.tsbuildinfo
+
+# ── OS / Editor artifacts ─────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# VS Code workspace state (project settings are OK to commit if desired)
+.vscode/settings.json
+.vscode/*.code-workspace
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# JetBrains
+.idea/
+*.iml
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Test / CI artifacts ───────────────────────────────────────────────────────
+.pytest_cache/
+test-results/
+playwright-report/
+
+# ── Evaluation output (results contain run-specific metrics, not source) ──────
+# NOTE: evaluation FIXTURES and questions.json ARE committed
+docs/evaluation_results_local.json
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+*.temp
+.python-version
