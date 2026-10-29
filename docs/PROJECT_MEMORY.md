@@ -13,18 +13,20 @@
 ## Verified implementation state
 
 ### Phase 0 — Repository Foundations
-- **Status:** In progress (foundations being laid)
+- **Status:** ✅ Complete — commit `5749358`
 - **Completed items (verified):**
   - All `ai_md/` spec documents exist and are the canonical spec source
-  - `.gitignore` created — covers Python, data dir, SQLite, Chroma, model files, node_modules, .env
+  - `.gitignore` created — covers Python, data dir, SQLite, Chroma, model files, node_modules, .env; verified with `git check-ignore`
+  - `.gitattributes` created — normalizes line endings to LF
   - `.env.example` created — all configurable env vars with safe defaults, documented
   - `README.md` created — honest status (nothing implemented yet), prerequisites, privacy notes, license caveats
   - `AGENTS.md` created at repo root (mirrors `ai_md/AGENTS.md` for tooling)
   - `docs/PROJECT_MEMORY.md` — this file
   - `docs/PHASE_CHECKLIST.md` — acceptance gate ledger
-  - `docs/DECISIONS.md` — architecture decisions log
-  - `data/sample_archive/` — synthetic fictional documents for evaluation
-- **Not yet done:** No backend or frontend code exists.
+  - `docs/DECISIONS.md` — architecture decisions log (D-01 through D-08)
+  - `data/sample_archive/` — 8 synthetic fictional documents (all evaluation categories)
+  - `data/evaluation/questions.json` — 20 labeled evaluation questions (all 7 categories)
+  - **Commit:** `5749358` on branch `main`, 35 files, 2363 insertions
 
 ### Phase 1–10
 - **Status:** Not started
@@ -76,3 +78,5 @@ None recorded yet. Create `docs/KNOWN_ISSUES.md` when the first real verified is
 | Date | Command | Result | Notes |
 |---|---|---|---|
 | 2026-10-29 | Initial repo inspection | Fresh repo, only `ai_md/` present | No commits yet |
+| 2026-10-29 | `git check-ignore` on 7 patterns | All 6 sensitive patterns correctly blocked; sample archive not blocked | `.gitignore` verified |
+| 2026-10-29 12:22 | `git commit 5749358` | 35 files, 2363 insertions, exit 0 | Phase 0 complete |

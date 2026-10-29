@@ -4,7 +4,7 @@
 
 ## Current state
 
-- [x] Phase 0 — Repository foundations (in progress — foundations laid, see below)
+- [x] Phase 0 — Repository foundations ✅ `5749358` (2026-10-29)
 - [ ] Phase 1 — Frontend/backend skeleton and health check
 - [ ] Phase 2 — Document ingestion and SQLite persistence
 - [ ] Phase 3 — Embeddings, Chroma persistence, semantic search
@@ -30,14 +30,16 @@
 - [x] `docs/DECISIONS.md` created
 - [x] `docs/PHASE_CHECKLIST.md` created (this file)
 - [x] `data/sample_archive/` created with synthetic fictional documents covering all evaluation categories
-- [ ] Git commit: all Phase 0 files committed (pending user review)
+- [x] Git commit: all Phase 0 files committed — hash `5749358`
 
 ### Verified command log
 
 | Date/time | Command | Result | Notes |
 |---|---|---|---|
-| 2026-10-29 12:09 | `git status` in repo | Branch `main`, no commits, only `ai_md/` untracked | Fresh repo confirmed |
-| 2026-10-29 | Phase 0 files written | Files created successfully | See files listed in acceptance gates above |
+| 2026-10-29 12:09 | `git status` | Branch `main`, no commits, only `ai_md/` untracked | Fresh repo confirmed |
+| 2026-10-29 12:17 | `git check-ignore -v backend/data/..., .env, venv/, node_modules/, chroma_store/, *.gguf` | All correctly ignored | `.gitignore` verified |
+| 2026-10-29 12:17 | `git check-ignore` on `data/sample_archive/...` | Exit 1 = not ignored (correctly tracked) | Sample archive committed |
+| 2026-10-29 12:22 | `git commit` | `5749358` — 35 files, 2363 insertions | First commit on `main` |
 
 ### Sample archive documents created
 
