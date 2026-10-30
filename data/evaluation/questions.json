@@ -1,7 +1,7 @@
 {
-  "_comment": "GhostArchive evaluation dataset. Synthetic fictional content only. Each question lists the expected supporting document(s) and whether it is answerable from the archive. chunk_ids are placeholders until Phase 2 assigns real IDs — update this file after ingestion in Phase 6.",
-  "_version": "0.1.0-planning",
-  "_status": "chunk_ids are placeholders; real IDs assigned during Phase 6 evaluation run",
+  "_comment": "GhostArchive evaluation dataset. Synthetic fictional content only. Each question lists the expected supporting document(s) and whether it is answerable from the archive. Runtime chunk IDs are generated from the ingested document records and are not persisted in this portable fixture.",
+  "_version": "0.1.0",
+  "_status": "verified dataset; runtime evaluation resolves evidence by source filename",
   "questions": [
     {
       "id": "Q01",
