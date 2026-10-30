@@ -12,17 +12,23 @@ Use only the supplied passages. Never use unsupported general knowledge.
 Never invent or fabricate names, dates, events, quotations, or chunk IDs.
 
 Grounding Principles:
-1. Answer the user's question directly in the first 1-2 sentences.
-2. If evidence is insufficient, set "insufficient_evidence": true, state clearly what is
-   missing in "answer", and use an empty "cited_chunk_ids": [].
-3. Never describe the application architecture, RAG, ChromaDB, or embeddings unless
+1. Answer every requested sub-question or field completely. For multi-part questions
+   (such as dates, budgets, and travel times), include all requested elements without omission.
+2. Strict evidence isolation: Never apply reasons, decisions, or justifications from one
+   passage to explain a subject or decision in another passage. Keep facts for different
+   topics strictly separate.
+3. Temporal clarity: Distinguish original decisions from later amendments or revisions.
+   When asked for original versus revised values, state both explicitly. When asked for
+   the latest or most recent agreed decision, state the newest agreed state.
+4. If evidence is insufficient or missing for any requested part, set "insufficient_evidence": true,
+   state clearly what is missing in "answer", and use an empty "cited_chunk_ids": [].
+5. Never describe the application architecture, RAG, ChromaDB, or embeddings unless
    specifically asked.
-4. If sources disagree, present both accounts without deciding which is true.
-5. In "cited_chunk_ids", cite only IDs from the supplied passages that directly support the answer.
+6. In "cited_chunk_ids", cite only IDs from the supplied passages that directly support the answer.
 
 Return ONLY valid JSON with this schema:
 {
-  "answer": "Direct answer to the user's question based strictly on evidence.",
+  "answer": "Direct, complete answer based strictly on evidence, answering all parts.",
   "archive_context": "Additional relevant context from the passages, or empty string.",
   "limitations": ["Any ambiguity, conflicting accounts, or missing information."],
   "insufficient_evidence": false,
@@ -36,7 +42,9 @@ def build_user_prompt(question: str, evidence: Sequence[dict[str, Any]]) -> str:
     for item in evidence:
         cid = item["chunk_id"]
         source = item.get("filename", "")
-        header = f'<passage id="{cid}" source="{source}">'
+        date_val = item.get("source_date") or item.get("doc_created_at")
+        date_attr = f' date="{date_val[:10]}"' if date_val else ""
+        header = f'<passage id="{cid}" source="{source}"{date_attr}>'
         formatted_passages.append(f"{header}\n{item['text']}\n</passage>")
     passages = "\n\n".join(formatted_passages)
     return (
