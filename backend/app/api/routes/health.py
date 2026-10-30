@@ -37,13 +37,23 @@ def get_health(
 
 
 def check_database(settings: Settings) -> DependencyDetail:
-    """Check if SQLite database file/directory is accessible."""
+    """Check if SQLite database file/directory is accessible and tables exist."""
     try:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
-        # Attempt connection test
         conn = sqlite3.connect(settings.db_path, timeout=2.0)
         try:
             conn.execute("SELECT 1")
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+                ).fetchall()
+            }
+            if not {"documents", "document_chunks"}.issubset(tables):
+                return DependencyDetail(
+                    status=DependencyStatus.ready,
+                    message="Database accessible (schema will auto-initialize on first write)",
+                )
         finally:
             conn.close()
         return DependencyDetail(status=DependencyStatus.ready)
@@ -56,9 +66,13 @@ def check_database(settings: Settings) -> DependencyDetail:
 
 
 def check_chroma(settings: Settings) -> DependencyDetail:
-    """Check if ChromaDB persistent storage directory is accessible."""
+    """Check if ChromaDB persistent storage directory is accessible and operational."""
     try:
         settings.chroma_path.mkdir(parents=True, exist_ok=True)
+        from app.retrieval.vector_store import ChromaVectorStore
+
+        store = ChromaVectorStore(settings)
+        _ = store.collection.count()
         return DependencyDetail(status=DependencyStatus.ready)
     except Exception as exc:
         logger.warning("Chroma path check failed: %s", type(exc).__name__)
@@ -70,18 +84,35 @@ def check_chroma(settings: Settings) -> DependencyDetail:
 
 def check_embedding_model(settings: Settings) -> DependencyDetail:
     """
-    Check if the embedding package is installed.
-    Does not download weights on health check.
+    Check if the embedding package is installed and whether weights are cached locally.
+    Does not initiate a heavy download on health check.
     """
+    import os
+    from pathlib import Path
+
     spec = importlib.util.find_spec("sentence_transformers")
-    if spec is not None:
+    if spec is None:
+        return DependencyDetail(
+            status=DependencyStatus.unavailable,
+            message="sentence-transformers package not installed in environment",
+        )
+
+    hf_home = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+    hub_dir = Path(hf_home) / "hub"
+    model_slug = "models--" + settings.embedding_model.replace("/", "--")
+    cached = (hub_dir / model_slug).exists() if hub_dir.exists() else False
+
+    if cached or os.environ.get("HF_HUB_OFFLINE") == "1":
         return DependencyDetail(
             status=DependencyStatus.ready,
-            message=f"Library installed ({settings.embedding_model})",
+            message=f"Model ready ({settings.embedding_model})",
         )
     return DependencyDetail(
         status=DependencyStatus.degraded,
-        message="sentence-transformers package not installed in environment",
+        message=(
+            f"Library installed ({settings.embedding_model}). "
+            "Model weights will download on first document import."
+        ),
     )
 
 
