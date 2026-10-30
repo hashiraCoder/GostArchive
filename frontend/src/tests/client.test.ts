@@ -61,4 +61,16 @@ describe("apiFetch client", () => {
       expect(apiErr.error.retryable).toBe(true);
     }
   });
+
+  it("handles 204 No Content response without throwing SyntaxError", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      headers: new Headers({ "content-length": "0" }),
+      text: async () => "",
+    } as unknown as Response);
+
+    const result = await apiFetch<void>("/documents/doc-1", { method: "DELETE" });
+    expect(result).toBeUndefined();
+  });
 });
