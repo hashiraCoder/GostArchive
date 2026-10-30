@@ -18,6 +18,48 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
+function formatDate(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function renderStatusBadge(status: string) {
+  const norm = status.toLowerCase();
+  if (norm === "ready") {
+    return (
+      <span className="inline-flex items-center rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+        ready
+      </span>
+    );
+  }
+  if (norm === "processing") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-600" />
+        processing
+      </span>
+    );
+  }
+  if (norm === "deleting") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded border border-gray-300 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-500" />
+        deleting
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-800">
+      {status}
+    </span>
+  );
+}
+
 export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   documents,
   loading,
@@ -87,11 +129,19 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
                 <p className="truncate font-medium">{document.filename}</p>
                 <p className="text-xs text-parchment-muted">
                   {document.file_type.toUpperCase()} · {formatBytes(document.byte_size)} · {document.chunk_count} chunks
+                  {document.created_at && formatDate(document.created_at) && (
+                    <span className="ml-2">· Added {formatDate(document.created_at)}</span>
+                  )}
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-xs uppercase tracking-wide text-status-ready">{document.status}</span>
-                <button type="button" onClick={() => setConfirming(document)} disabled={deletingId === document.id} className="text-sm text-status-unavailable underline disabled:opacity-50">
+                {renderStatusBadge(document.status)}
+                <button
+                  type="button"
+                  onClick={() => setConfirming(document)}
+                  disabled={deletingId !== null}
+                  className="text-sm text-status-unavailable underline disabled:opacity-50"
+                >
                   {deletingId === document.id ? "Deleting…" : "Delete"}
                 </button>
               </div>
@@ -106,8 +156,25 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
             <h3 id="delete-title" className="font-serif text-lg font-bold">Delete {confirming.filename}?</h3>
             <p className="mt-2 text-sm text-parchment-muted">This removes the source file, metadata, chunks, and search vectors.</p>
             <div className="mt-5 flex justify-end gap-3">
-              <button type="button" onClick={() => setConfirming(null)} className="rounded border border-parchment-border px-3 py-2 text-sm">Cancel</button>
-              <button type="button" onClick={() => { onDelete(confirming); setConfirming(null); }} className="rounded bg-status-unavailable px-3 py-2 text-sm text-white">Delete document</button>
+              <button
+                type="button"
+                onClick={() => setConfirming(null)}
+                disabled={deletingId !== null}
+                className="rounded border border-parchment-border px-3 py-2 text-sm disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingId !== null}
+                onClick={() => {
+                  onDelete(confirming);
+                  setConfirming(null);
+                }}
+                className="rounded bg-status-unavailable px-3 py-2 text-sm text-white disabled:opacity-50"
+              >
+                {deletingId === confirming.id ? "Deleting…" : "Delete document"}
+              </button>
             </div>
           </div>
         </div>
