@@ -10,17 +10,17 @@ GhostArchive helps you rediscover what your own collection of notes, letters, jo
 
 ## Status
 
-> ⚠️ **This project is in active development.** The features listed below describe the intended MVP, not yet-implemented functionality. The checklist in `docs/PHASE_CHECKLIST.md` tracks what is actually done.
+> ⚠️ **This project is in active development.** The checklist in `docs/PHASE_CHECKLIST.md` tracks what is actually done.
 
 ### What is implemented
 
-- [ ] Repository foundations and project documentation (Phase 0 — *in progress*)
-- [ ] Backend skeleton and health check (Phase 1)
-- [ ] Document ingestion and SQLite persistence (Phase 2)
-- [ ] Embeddings and semantic search (Phase 3)
-- [ ] Grounded Q&A with citation validation (Phase 4)
-- [ ] Evidence UI and product polish (Phase 5)
-- [ ] Test suite and evaluation runner (Phase 6)
+- [x] Repository foundations and project documentation (Phase 0)
+- [x] Backend skeleton and health check (Phase 1)
+- [x] Document ingestion and SQLite persistence (Phase 2)
+- [x] Embeddings and semantic search (Phase 3)
+- [x] Grounded Q&A with citation validation (Phase 4)
+- [x] Evidence UI and product polish (Phase 5)
+- [x] Test suite and evaluation runner (Phase 6)
 - [ ] README, demo, submission (Phase 7)
 
 ---
@@ -31,8 +31,9 @@ GhostArchive helps you rediscover what your own collection of notes, letters, jo
 - Import `.txt` and `.md` files entirely locally — nothing leaves your machine.
 - Index them using a local embedding model (Sentence Transformers).
 - Search by meaning with passages ranked by relevance.
-- Answer questions using a local language model (Ollama) grounded in retrieved evidence.
-- Show the exact original passage behind every citation.
+- Answer questions through `POST /api/chat` using a local Ollama model grounded in retrieved evidence.
+- Show trusted source metadata and the exact retrieved passage behind every citation.
+- Manage the local archive through the React UI, including import, semantic search, grounded questions, citation inspection, and confirmed deletion.
 - Tell you honestly when your archive does not contain an answer.
 
 **GhostArchive does NOT:**
@@ -114,13 +115,14 @@ npm run dev
 - The app is single-user; no access controls.
 - Semantic search quality depends on the embedding model and chunking strategy; it has not been benchmarked on all document types.
 - The language model (`gemma3:1b`) is small and may produce incomplete answers; it is grounded by citation validation, not factuality guarantees.
+- Ollama must be running locally for answer generation; search and document management remain available when it is offline.
 - First-time setup requires an internet connection to download the models.
 
 ---
 
 ## Running tests
 
-> Commands will be updated in Phase 6 with real output.
+The backend and frontend suites, plus the deterministic offline evaluation runner, are verified.
 
 ```powershell
 # Backend tests
@@ -130,6 +132,10 @@ pytest --tb=short
 # Frontend tests
 cd frontend
 npm run test
+
+# Deterministic corpus evaluation
+cd ..\backend
+.\venv\Scripts\python.exe -m app.evaluation.runner --questions ..\data\evaluation\questions.json --corpus ..\data\sample_archive
 ```
 
 ---
