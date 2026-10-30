@@ -34,6 +34,9 @@ class SearchResult(BaseModel):
     score: float
     cosine_similarity: float = 0.0
     relevance_label: str = "Relevant"
+    source_date: str | None = None
+    doc_created_at: str | None = None
+    title: str | None = None
 
 
 class SearchResponse(BaseModel):
