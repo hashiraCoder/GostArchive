@@ -37,6 +37,7 @@ env/
 
 # ── Local data directory — CRITICAL: never commit user documents or indexes ───
 backend/data/
+backend/backend/
 data/local/
 
 # SQLite databases (runtime state)
