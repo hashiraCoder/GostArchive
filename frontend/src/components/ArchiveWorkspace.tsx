@@ -80,12 +80,18 @@ export const ArchiveWorkspace: React.FC = () => {
       setDocuments((current) => current.filter((item) => item.id !== document.id));
       setSearchResults((current) => current.filter((item) => item.document_id !== document.id));
     } catch (error) {
-      setFailedDelete(document);
-      setDeleteError(
-        error instanceof ApiException
-          ? error.error
-          : { code: "UNKNOWN_ERROR", message: "Could not delete document.", retryable: true }
-      );
+      if (error instanceof ApiException && error.status === 404) {
+        // Document already deleted on server, sync local UI state
+        setDocuments((current) => current.filter((item) => item.id !== document.id));
+        setSearchResults((current) => current.filter((item) => item.document_id !== document.id));
+      } else {
+        setFailedDelete(document);
+        setDeleteError(
+          error instanceof ApiException
+            ? error.error
+            : { code: "UNKNOWN_ERROR", message: "Could not delete document.", retryable: true }
+        );
+      }
     } finally {
       setDeletingId(null);
     }
@@ -247,7 +253,15 @@ export const ArchiveWorkspace: React.FC = () => {
                   <strong>{result.filename}</strong>
                   {result.page_number != null && <span className="ml-2">(Page {result.page_number})</span>}
                 </div>
-                <span className="rounded bg-parchment-border/50 px-2 py-0.5 text-xs font-medium">
+                <span
+                  className={`rounded px-2 py-0.5 text-xs font-medium border ${
+                    result.relevance_label === "High match"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : result.relevance_label === "Medium match"
+                      ? "border-blue-200 bg-blue-50 text-blue-800"
+                      : "border-parchment-border bg-parchment-border/40 text-parchment-muted"
+                  }`}
+                >
                   {result.relevance_label || "Relevant"}
                 </span>
               </div>
@@ -285,23 +299,41 @@ export const ArchiveWorkspace: React.FC = () => {
         {chatError && <ErrorBanner error={chatError} onDismiss={() => setChatError(null)} />}
 
         {chat && (
-          <article className="rounded border border-parchment-border bg-parchment-surface p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="font-serif text-lg font-bold">Answer</h3>
-              <span className="text-xs text-parchment-muted">{chat.model}</span>
+          <article className="rounded border border-parchment-border bg-parchment-surface p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3 border-b border-parchment-border pb-3">
+              <div>
+                <h3 className="font-serif text-lg font-bold">Answer</h3>
+                <span className="text-xs text-parchment-muted">
+                  {chat.retrieval_count > 0
+                    ? `Grounded in ${chat.retrieval_count} retrieved source passage${chat.retrieval_count > 1 ? "s" : ""}`
+                    : "Direct archive assistance"}
+                </span>
+              </div>
+              <span className="rounded border border-parchment-border bg-parchment-surface/80 px-2 py-1 text-xs text-parchment-muted">
+                {chat.model}
+              </span>
             </div>
 
-            <p className="mt-3 leading-relaxed font-serif text-base">{chat.answer}</p>
+            <div className="rounded border-l-4 border-parchment-accent bg-parchment-surface/60 p-4">
+              <p className="leading-relaxed font-serif text-base text-parchment-text whitespace-pre-line">
+                {chat.answer}
+              </p>
+            </div>
 
             {chat.archive_context && (
-              <div className="mt-3 text-sm text-parchment-muted">
-                <strong>Archive details:</strong> {chat.archive_context}
+              <div className="text-xs text-parchment-muted">
+                <strong>Archive context:</strong> {chat.archive_context}
               </div>
             )}
 
             {chat.limitations && chat.limitations.length > 0 && (
-              <div className="mt-2 text-xs text-parchment-muted italic">
-                {chat.limitations.join(" ")}
+              <div className="rounded border border-amber-200/60 bg-amber-50/50 p-3 text-xs text-amber-900">
+                <strong>Scope & Limitations:</strong>
+                <ul className="mt-1 list-disc pl-4 space-y-1">
+                  {chat.limitations.map((lim, idx) => (
+                    <li key={idx}>{lim}</li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -310,20 +342,41 @@ export const ArchiveWorkspace: React.FC = () => {
                 Insufficient evidence in the retrieved archive passages.
               </p>
             ) : (
-              <div className="mt-5 space-y-3">
-                <h4 className="text-xs font-semibold uppercase tracking-widest text-parchment-muted">Sources</h4>
-                {chat.citations.map((citation) => (
-                  <details key={citation.chunk_id} open className="rounded border border-parchment-border p-3">
-                    <summary className="cursor-pointer text-sm font-medium flex items-center justify-between">
-                      <span>{citation.document_title || citation.filename}</span>
-                      <span className="text-xs text-parchment-muted">{citation.evidence_type || "Direct evidence"}</span>
-                    </summary>
-                    <p className="mt-2 border-l-2 border-parchment-accent pl-3 text-sm leading-relaxed">
-                      {citation.excerpt}
-                    </p>
-                  </details>
-                ))}
-              </div>
+              chat.citations && chat.citations.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold uppercase tracking-widest text-parchment-muted">Sources</h4>
+                    <span className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                      ✓ SQLite Verified
+                    </span>
+                  </div>
+                  {chat.citations.map((citation) => (
+                    <details
+                      key={citation.chunk_id}
+                      open
+                      className="group rounded border border-parchment-border bg-parchment-surface/50 p-3 transition hover:border-parchment-accent"
+                    >
+                      <summary className="cursor-pointer text-sm font-medium flex items-center justify-between select-none">
+                        <span className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-parchment-accent font-semibold">
+                            [{citation.chunk_id}]
+                          </span>
+                          <span>{citation.document_title || citation.filename}</span>
+                          {citation.page_number != null && (
+                            <span className="text-xs text-parchment-muted">(Page {citation.page_number})</span>
+                          )}
+                        </span>
+                        <span className="text-xs text-parchment-muted bg-parchment-border/40 px-2 py-0.5 rounded">
+                          {citation.evidence_type || "Direct evidence"}
+                        </span>
+                      </summary>
+                      <p className="mt-2 border-l-2 border-parchment-accent pl-3 text-sm leading-relaxed text-parchment-text">
+                        {citation.excerpt}
+                      </p>
+                    </details>
+                  ))}
+                </div>
+              )
             )}
           </article>
         )}
