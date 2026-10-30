@@ -17,6 +17,10 @@ class OllamaClient:
         self._settings = settings
         self._client = client
 
+    @property
+    def model_name(self) -> str:
+        return self._settings.ollama_model
+
     def chat(self, system_prompt: str, user_prompt: str) -> str:
         payload: dict[str, Any] = {
             "model": self._settings.ollama_model,
