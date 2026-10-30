@@ -82,7 +82,7 @@ def validate_model_output(
             "chunk_id": item["chunk_id"],
             "document_id": item["document_id"],
             "filename": item["filename"],
-            "document_title": item.get("filename"),
+            "document_title": item.get("title") or item.get("filename"),
             "page_number": item.get("page_number"),
             "excerpt": item["text"],
             "evidence_type": "direct",
