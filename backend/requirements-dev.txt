@@ -1,0 +1,5 @@
+# GhostArchive backend — dev/test dependencies
+pytest
+pytest-asyncio
+httpx
+ruff

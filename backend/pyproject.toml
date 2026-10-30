@@ -1,0 +1,21 @@
+[project]
+name = "ghostarchive-backend"
+version = "0.1.0"
+description = "GhostArchive local-first RAG backend"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]   # FastAPI Depends() in default args
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

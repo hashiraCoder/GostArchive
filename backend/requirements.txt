@@ -1,0 +1,11 @@
+# GhostArchive backend — runtime dependencies
+# Exact versions pinned after first successful install.
+# Do not invent version numbers; fill in after `pip install -r requirements.txt`.
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+pydantic-settings
+httpx
+python-multipart
+sentence-transformers==6.2.0
+chromadb==1.5.9
