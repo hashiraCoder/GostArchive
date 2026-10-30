@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.core.errors import ErrorCode, GhostArchiveException
 from app.database.connection import connect, initialize_database
 from app.generation.ollama_client import OllamaClient
+from app.generation.provider import LLMProvider, get_llm_provider
 
 logger = logging.getLogger("ghostarchive.summary")
 
@@ -36,9 +37,13 @@ def summarize_archive(
     max_chunks: int = 12,
     *,
     ollama_client: OllamaClient | None = None,
+    llm_provider: LLMProvider | None = None,
 ) -> dict[str, Any]:
     """Generate a structured overview of the archive or a specific document."""
     initialize_database(settings)
+    provider = llm_provider or ollama_client or get_llm_provider(settings)
+    active_model = getattr(provider, "model_name", settings.ollama_model)
+    system_limitations: list[str] = []
 
     with connect(settings) as connection:
         if document_id:
@@ -54,10 +59,11 @@ def summarize_archive(
                 )
             chunks = connection.execute(
                 """
-                SELECT id, chunk_index, content
-                FROM document_chunks
-                WHERE document_id = ?
-                ORDER BY chunk_index
+                SELECT c.id, c.chunk_index, c.content, d.original_filename
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.document_id = ?
+                ORDER BY c.chunk_index
                 LIMIT ?
                 """,
                 (document_id, max_chunks),
@@ -78,11 +84,28 @@ def summarize_archive(
                 f"({len(chunks)} of {total_chunks} chunks inspected)."
             )
         else:
+            all_doc_count = connection.execute("SELECT count(*) FROM documents").fetchone()[0]
             docs = connection.execute(
                 "SELECT id, original_filename FROM documents "
                 "WHERE status = 'ready' ORDER BY created_at DESC"
             ).fetchall()
             if not docs:
+                if all_doc_count > 0:
+                    return {
+                        "summary": (
+                            "No documents in the archive are ready to be summarized. "
+                            "Existing documents may still be processing or encountered an error."
+                        ),
+                        "scope": f"0 of {all_doc_count} documents are ready in the archive.",
+                        "inspected_documents": [],
+                        "limitations": [
+                            (
+                                f"Archive contains {all_doc_count} document(s), "
+                                "but none have 'ready' status."
+                            )
+                        ],
+                        "model": active_model,
+                    }
                 return {
                     "summary": (
                         "The archive is currently empty. Import documents to generate a summary."
@@ -90,7 +113,7 @@ def summarize_archive(
                     "scope": "No documents in archive.",
                     "inspected_documents": [],
                     "limitations": ["No documents available to summarize."],
-                    "model": settings.ollama_model,
+                    "model": active_model,
                 }
             # Distribute chunks evenly across available documents
             chunks_per_doc = max(1, max_chunks // len(docs))
@@ -108,28 +131,34 @@ def summarize_archive(
                     """,
                     (doc["id"], chunks_per_doc),
                 ).fetchall()
-                chunks.extend(doc_chunks)
-                inspected_docs.append(
-                    {
-                        "document_id": doc["id"],
-                        "filename": doc["original_filename"],
-                        "chunk_count": len(doc_chunks),
-                    }
-                )
-                if len(chunks) >= max_chunks:
-                    break
-            total_doc_count = len(docs)
+                if doc_chunks:
+                    chunks.extend(doc_chunks)
+                    inspected_docs.append(
+                        {
+                            "document_id": doc["id"],
+                            "filename": doc["original_filename"],
+                            "chunk_count": len(doc_chunks),
+                        }
+                    )
+
+            total_ready_count = len(docs)
             total_archive_chunks = connection.execute(
                 "SELECT count(*) FROM document_chunks"
             ).fetchone()[0]
             scope = (
-                f"Archive-wide summary covering {len(inspected_docs)} of {total_doc_count} "
-                f"documents ({len(chunks)} of {total_archive_chunks} total chunks inspected)."
+                f"Archive-wide summary covering {len(inspected_docs)} of {total_ready_count} "
+                f"ready documents ({len(chunks)} of {total_archive_chunks} total chunks inspected)."
             )
+            unready_count = all_doc_count - total_ready_count
+            if unready_count > 0:
+                system_limitations.append(
+                    f"{unready_count} document(s) in the archive are not in ready status "
+                    "and were omitted."
+                )
 
     formatted_excerpts = []
     for c in chunks:
-        fn = c["original_filename"] if "original_filename" in c else doc["original_filename"]
+        fn = c["original_filename"]
         formatted_excerpts.append(f"[document: {fn}]\n{c['content']}")
     excerpts_text = "\n\n".join(formatted_excerpts)
     user_prompt = (
@@ -137,8 +166,7 @@ def summarize_archive(
         "Provide a structured summary of what these archive documents discuss."
     )
 
-    client = ollama_client or OllamaClient(settings)
-    raw = client.chat(SUMMARY_SYSTEM_PROMPT, user_prompt)
+    raw = provider.chat(SUMMARY_SYSTEM_PROMPT, user_prompt)
 
     # Parse response
     cleaned = raw.strip()
@@ -156,10 +184,15 @@ def summarize_archive(
     if isinstance(limitations, str):
         limitations = [limitations]
 
+    combined_limitations = list(system_limitations)
+    for lim in limitations:
+        if lim not in combined_limitations:
+            combined_limitations.append(lim)
+
     return {
         "summary": summary_text,
         "scope": scope,
         "inspected_documents": inspected_docs,
-        "limitations": limitations,
-        "model": settings.ollama_model,
+        "limitations": combined_limitations,
+        "model": active_model,
     }
