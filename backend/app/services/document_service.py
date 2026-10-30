@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -26,6 +27,8 @@ from app.database.repositories.documents import (
 from app.ingestion.normalize import chunk_text, normalize_text
 from app.retrieval.embeddings import EmbeddingProvider, get_embedding_provider
 from app.retrieval.vector_store import ChromaVectorStore
+
+logger = logging.getLogger("ghostarchive.documents")
 
 ALLOWED_EXTENSIONS = {".txt", ".md"}
 
@@ -205,16 +208,28 @@ def get_document_by_id(settings: Settings, document_id: str) -> dict | None:
 
 
 def remove_document(settings: Settings, document_id: str) -> bool:
-    """Delete a document row and its stored source file."""
+    """Idempotently delete a document row, stored source file, and vector chunks."""
     initialize_database(settings)
-    with connect(settings) as connection:
-        row = mark_deleting(connection, document_id)
-        if row is None:
-            return False
-        storage_path = document_storage_path(settings, row)
-    storage_path.unlink(missing_ok=True)
+    chunk_ids: list[str] = []
     with connect(settings) as connection:
         chunks = get_chunks(connection, document_id)
-        ChromaVectorStore(settings).delete([chunk["id"] for chunk in chunks])
+        chunk_ids = [chunk["id"] for chunk in chunks]
+        row = mark_deleting(connection, document_id)
+        if row is not None:
+            storage_path = document_storage_path(settings, row)
+            storage_path.unlink(missing_ok=True)
+
+    if chunk_ids:
+        try:
+            ChromaVectorStore(settings).delete(chunk_ids)
+        except Exception as exc:
+            logger.warning(
+                "Could not delete Chroma vectors for document %s: %s",
+                document_id,
+                exc,
+            )
+
+    with connect(settings) as connection:
         delete_document(connection, document_id)
+
     return True
