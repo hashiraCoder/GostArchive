@@ -95,6 +95,14 @@ def test_list_and_delete_document(client: TestClient, temp_settings: Settings) -
     assert deleted.status_code == 204
     assert client.get(f"/api/documents/{document_id}").status_code == 404
 
+    # Idempotent: repeating delete returns 204 without error
+    second_deleted = client.delete(f"/api/documents/{document_id}")
+    assert second_deleted.status_code == 204
+
+    # Deleting arbitrary non-existent ID also returns 204
+    non_existent = client.delete("/api/documents/non-existent-id-12345")
+    assert non_existent.status_code == 204
+
     with sqlite3.connect(temp_settings.db_path) as connection:
         assert (
             connection.execute("SELECT 1 FROM documents WHERE id = ?", (document_id,)).fetchone()
