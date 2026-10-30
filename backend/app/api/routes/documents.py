@@ -56,5 +56,4 @@ def delete_uploaded_document(
     document_id: str,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    if not remove_document(settings, document_id):
-        raise GhostArchiveException(ErrorCode.NOT_FOUND, "Document not found.", 404)
+    remove_document(settings, document_id)
