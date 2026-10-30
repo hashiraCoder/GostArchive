@@ -62,8 +62,24 @@ def _sanitize_fts_query(query: str) -> str:
     if not tokens:
         return ""
     # Safe FTS phrase/token query
-    escaped = [f'"{token}"' for token in tokens]
+    # In SQLite FTS5 with porter tokenizer, quoting words disables stemming.
+    # Keep alphanumeric tokens bare so porter stemming works (e.g. preferences -> preference).
+    # Reserved FTS5 syntax words are quoted.
+    reserved = {"and", "or", "not", "near"}
+    escaped = [f'"{token}"' if token.lower() in reserved else token for token in tokens]
     return " OR ".join(escaped)
+
+
+def _detect_temporal_intent(query: str) -> str | None:
+    """Classify whether query asks for latest, earliest, or chronological ordering."""
+    q = query.lower()
+    if re.search(r"\b(?:latest|most\s+recent|newest|last|current(?:\s+agreed)?|updated)\b", q):
+        return "latest"
+    if re.search(r"\b(?:original|originally|first|initial|earliest|initially)\b", q):
+        return "earliest"
+    if re.search(r"\b(?:timeline|history|chronological|changes|progression|revisions?)\b", q):
+        return "chronological"
+    return None
 
 
 def _lexical_search(
@@ -116,7 +132,7 @@ def _ready_chunk_rows(
         placeholders = ",".join("?" for _ in chunk_ids)
         params: list[str] = list(chunk_ids)
         query = f"""
-            SELECT c.*, d.original_filename
+            SELECT c.*, d.original_filename, d.title, d.source_date, d.created_at AS doc_created_at
             FROM document_chunks AS c
             JOIN documents AS d ON d.id = c.document_id
             WHERE c.id IN ({placeholders}) AND d.status = 'ready'
@@ -161,10 +177,13 @@ def search_documents(
     provider = embedding_provider or get_embedding_provider(settings.embedding_model)
     store = vector_store or ChromaVectorStore(settings)
 
-    # 1. Semantic retrieval (bounded to effective_top_k)
+    # Expanded candidate pool for deep RRF fusion (retrieve 15 candidates when capped at default 5)
+    candidate_k = 15 if effective_top_k <= 5 else effective_top_k
+
+    # 1. Semantic retrieval
     result = store.query(
         provider.embed_query(query),
-        effective_top_k,
+        candidate_k,
         document_ids,
     )
     raw_ids = result.get("ids", [[]])[0]
@@ -180,15 +199,17 @@ def search_documents(
     # 2. Lexical retrieval (SQLite FTS5 BM25)
     lexical_ranks: dict[str, int] = {}
     if settings.retrieval_lexical_boost:
-        lexical_ranks = _lexical_search(settings, query, effective_top_k, document_ids)
+        lexical_ranks = _lexical_search(settings, query, candidate_k, document_ids)
 
-    # 3. Reciprocal Rank Fusion & relevance filtering
+    # 3. Reciprocal Rank Fusion & calibrated relevance filtering
     all_candidate_ids = set(semantic_ranks.keys()) | set(lexical_ranks.keys())
     if not all_candidate_ids:
         return []
 
     rrf_k = 60
     scored_candidates: list[tuple[str, float, float, int | None]] = []
+    vector_only_threshold = max(threshold, 0.35)
+
     for cid in all_candidate_ids:
         s_rank = semantic_ranks.get(cid)
         l_rank = lexical_ranks.get(cid)
@@ -203,10 +224,15 @@ def search_documents(
 
         # Relevance filtering:
         # A result is deemed relevant if:
-        # - Cosine similarity meets or exceeds configured threshold (e.g. 0.30)
-        # OR
-        # - Strong lexical match in top 3 AND positive semantic alignment (>= 0.18)
-        is_relevant = (sim >= threshold) or (l_rank is not None and l_rank < 3 and sim >= 0.18)
+        # 1. Strong lexical match in top candidates AND positive semantic alignment (>= 0.15)
+        # 2. Standard match meeting threshold when lexical presence exists
+        # 3. Pure vector match with no lexical match must meet higher bar (>= 0.35)
+        #    to prevent irrelevant documents from matching on arbitrary nearest neighbors.
+        is_relevant = (
+            (l_rank is not None and l_rank < 5 and sim >= 0.15)
+            or (l_rank is not None and sim >= threshold)
+            or (l_rank is None and sim >= vector_only_threshold)
+        )
         if is_relevant:
             scored_candidates.append((cid, rrf_score, sim, l_rank))
 
@@ -222,7 +248,7 @@ def search_documents(
     rows = _ready_chunk_rows(settings, selected_ids, document_ids or [])
     output: list[dict[str, Any]] = []
 
-    for cid, _rrf_score, sim, l_rank in selected:
+    for cid, rrf_score, sim, l_rank in selected:
         row = rows.get(cid)
         if row is None:
             logger.warning("Dropping orphan or non-ready vector: %s", cid)
@@ -233,6 +259,9 @@ def search_documents(
                 "chunk_id": row["id"],
                 "document_id": row["document_id"],
                 "filename": row["original_filename"],
+                "title": row["title"],
+                "source_date": row["source_date"],
+                "doc_created_at": row["doc_created_at"],
                 "page_number": row["page_number"],
                 "text": row["content"],
                 "start_char": row["start_char"],
@@ -240,6 +269,32 @@ def search_documents(
                 "score": bounded_score,
                 "cosine_similarity": round(sim, 4),
                 "relevance_label": _compute_relevance_label(sim, l_rank),
+                "_rrf_score": rrf_score,
             }
         )
+
+    # 5. Temporal ordering when query has temporal intent
+    temporal_intent = _detect_temporal_intent(query)
+    if temporal_intent and output:
+
+        def _get_sort_key(item: dict[str, Any]) -> str:
+            return item.get("source_date") or item.get("doc_created_at") or ""
+
+        has_dates = any(_get_sort_key(item) for item in output)
+        if has_dates:
+            if temporal_intent == "latest":
+                output.sort(
+                    key=lambda x: (_get_sort_key(x), x.get("_rrf_score", 0.0)),
+                    reverse=True,
+                )
+            elif temporal_intent in ("earliest", "chronological"):
+                output.sort(
+                    key=lambda x: (_get_sort_key(x) or "9999-99-99", -x.get("_rrf_score", 0.0))
+                )
+
+    # Remove internal temporary fields before returning
+    for item in output:
+        item.pop("_rrf_score", None)
+
+    return output
     return output
