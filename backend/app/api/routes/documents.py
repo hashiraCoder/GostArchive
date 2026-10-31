@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
 from app.core.config import Settings, get_settings
 from app.core.errors import ErrorCode, GhostArchiveException
 from app.schemas.documents import (
+    BulkDeleteRequest,
+    BulkDeleteResponse,
     DocumentListResponse,
     DocumentResponse,
     DocumentUploadResponse,
 )
 from app.services.document_service import (
+    bulk_remove_documents,
     get_document_by_id,
     get_documents,
     ingest_upload,
@@ -35,9 +38,30 @@ async def upload_document(
 @router.get("", response_model=DocumentListResponse)
 def list_uploaded_documents(
     settings: Annotated[Settings, Depends(get_settings)],
+    query: Annotated[str | None, Query(max_length=200)] = None,
+    status: Annotated[str | None, Query(max_length=50)] = None,
+    file_type: Annotated[str | None, Query(max_length=20)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> DocumentListResponse:
-    items = get_documents(settings)
-    return DocumentListResponse(items=items, total=len(items))
+    items, total = get_documents(
+        settings,
+        query=query,
+        status=status,
+        file_type=file_type,
+        limit=limit,
+        offset=offset,
+    )
+    return DocumentListResponse(items=items, total=total)
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResponse)
+def bulk_delete_documents(
+    request: BulkDeleteRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> BulkDeleteResponse:
+    results, total_deleted = bulk_remove_documents(settings, request.document_ids)
+    return BulkDeleteResponse(results=results, total_deleted=total_deleted)
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
