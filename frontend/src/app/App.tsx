@@ -1,12 +1,15 @@
 import React from "react";
 import { AppShell } from "../components/AppShell";
 import { ArchiveWorkspace } from "../components/ArchiveWorkspace";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 
 export const App: React.FC = () => {
   return (
-    <AppShell>
-      <ArchiveWorkspace />
-    </AppShell>
+    <ErrorBoundary>
+      <AppShell>
+        <ArchiveWorkspace initialTab="overview" />
+      </AppShell>
+    </ErrorBoundary>
   );
 };
 
