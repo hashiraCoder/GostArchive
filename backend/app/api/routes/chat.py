@@ -24,5 +24,7 @@ def chat(
             request.question,
             request.top_k,
             request.document_ids,
+            conversation_id=request.conversation_id,
+            client_turn_id=request.client_turn_id,
         )
     )
