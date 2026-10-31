@@ -14,6 +14,7 @@ from app.api.router import api_router
 from app.core.config import configure_logging, get_settings
 from app.core.errors import register_exception_handlers
 from app.database.connection import initialize_database
+from app.services.document_service import recover_interrupted_documents
 
 
 def create_app() -> FastAPI:
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
         settings.files_dir.mkdir(parents=True, exist_ok=True)
         settings.chroma_path.mkdir(parents=True, exist_ok=True)
         initialize_database(settings)
+        recover_interrupted_documents(settings)
         yield
 
     app = FastAPI(
@@ -42,7 +44,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
 
