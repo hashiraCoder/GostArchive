@@ -82,6 +82,33 @@ def check_chroma(settings: Settings) -> DependencyDetail:
         )
 
 
+def check_document_storage(
+    settings: Settings,
+) -> tuple[DependencyDetail, DependencyDetail, DependencyDetail]:
+    """Check both SQLite database and ChromaDB vector store directories."""
+    db_detail = check_database(settings)
+    chroma_detail = check_chroma(settings)
+
+    if (
+        db_detail.status == DependencyStatus.unavailable
+        or chroma_detail.status == DependencyStatus.unavailable
+    ):
+        combined_status = DependencyStatus.unavailable
+        msg = f"Storage error (SQLite: {db_detail.status}, Chroma: {chroma_detail.status})"
+    elif (
+        db_detail.status == DependencyStatus.degraded
+        or chroma_detail.status == DependencyStatus.degraded
+    ):
+        combined_status = DependencyStatus.degraded
+        msg = f"Storage degraded (SQLite: {db_detail.status}, Chroma: {chroma_detail.status})"
+    else:
+        combined_status = DependencyStatus.ready
+        msg = "SQLite and ChromaDB storage accessible and operational"
+
+    storage_detail = DependencyDetail(status=combined_status, message=msg)
+    return storage_detail, db_detail, chroma_detail
+
+
 def check_embedding_model(settings: Settings) -> DependencyDetail:
     """
     Check if the embedding package is installed and whether weights are cached locally.
@@ -116,17 +143,32 @@ def check_embedding_model(settings: Settings) -> DependencyDetail:
     )
 
 
-async def check_ollama(settings: Settings) -> DependencyDetail:
-    """Check if local Ollama daemon is reachable and if the configured model is installed."""
+def check_embedding_service(settings: Settings) -> DependencyDetail:
+    """Check if local embedding provider and sentence-transformers model are ready."""
+    return check_embedding_model(settings)
+
+
+async def check_ollama_connectivity(
+    settings: Settings,
+) -> tuple[DependencyDetail, DependencyDetail, DependencyDetail]:
+    """
+    Check Ollama daemon reachability (ollama_service) and model existence (model_available)
+    via GET /api/tags with a lightweight 2.0s timeout.
+    """
     url = f"{settings.ollama_base_url.rstrip('/')}/api/tags"
+    target_model = settings.ollama_model
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(url)
             if resp.status_code == 200:
                 data = resp.json()
-                models = [m.get("name") for m in data.get("models", [])]
+                models = [m.get("name") for m in data.get("models", []) if m.get("name")]
+                ollama_service = DependencyDetail(
+                    status=DependencyStatus.ready,
+                    message=f"Ollama daemon reachable at {settings.ollama_base_url}",
+                )
+
                 # Check for exact or base model match (e.g., "gemma3:1b" vs "gemma3:1b-instruct")
-                target_model = settings.ollama_model
                 model_found = any(
                     target_model == m
                     or m.startswith(f"{target_model}:")
@@ -135,20 +177,109 @@ async def check_ollama(settings: Settings) -> DependencyDetail:
                     if m
                 )
                 if model_found:
-                    return DependencyDetail(status=DependencyStatus.ready)
-                return DependencyDetail(
-                    status=DependencyStatus.degraded,
-                    message=f"Model '{target_model}' not found in local Ollama models",
-                )
-            return DependencyDetail(
+                    model_available = DependencyDetail(
+                        status=DependencyStatus.ready,
+                        message=f"Model '{target_model}' installed in local Ollama",
+                    )
+                    ollama_summary = DependencyDetail(status=DependencyStatus.ready)
+                else:
+                    model_available = DependencyDetail(
+                        status=DependencyStatus.degraded,
+                        message=f"Model '{target_model}' not found in local Ollama models",
+                    )
+                    ollama_summary = DependencyDetail(
+                        status=DependencyStatus.degraded,
+                        message=f"Model '{target_model}' not found in local Ollama models",
+                    )
+                return ollama_service, model_available, ollama_summary
+            service_detail = DependencyDetail(
                 status=DependencyStatus.unavailable,
                 message=f"Ollama returned unexpected status {resp.status_code}",
             )
+            model_detail = DependencyDetail(
+                status=DependencyStatus.unavailable,
+                message="Cannot verify model availability: Ollama service error",
+            )
+            return service_detail, model_detail, service_detail
     except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError) as exc:
         logger.debug("Ollama connectivity check failed: %s", type(exc).__name__)
-        return DependencyDetail(
+        service_detail = DependencyDetail(
             status=DependencyStatus.unavailable,
             message="Local Ollama service unreachable",
+        )
+        model_detail = DependencyDetail(
+            status=DependencyStatus.unavailable,
+            message="Cannot verify model availability: Ollama daemon is offline",
+        )
+        return service_detail, model_detail, service_detail
+
+
+async def check_ollama(settings: Settings) -> DependencyDetail:
+    """Legacy helper returning unified Ollama dependency status for backward compatibility."""
+    _, _, summary = await check_ollama_connectivity(settings)
+    return summary
+
+
+async def check_model_inference(
+    settings: Settings,
+    model_status: DependencyStatus,
+    *,
+    probe_inference: bool = False,
+) -> DependencyDetail:
+    """
+    Check model inference capability.
+    Avoids expensive model generation requests during routine health polling.
+    When probe_inference=True (via ?check_inference=true), performs a lightweight test generation
+    with an explicit strict timeout of 5.0s.
+    """
+    if model_status == DependencyStatus.unavailable:
+        return DependencyDetail(
+            status=DependencyStatus.unavailable,
+            message="Inference unavailable: Ollama service is unreachable",
+        )
+    if model_status == DependencyStatus.degraded:
+        return DependencyDetail(
+            status=DependencyStatus.degraded,
+            message=(
+                f"Inference unavailable: model '{settings.ollama_model}' not found in local Ollama"
+            ),
+        )
+
+    if not probe_inference:
+        return DependencyDetail(
+            status=DependencyStatus.ready,
+            message="Model available for inference (pass ?check_inference=true for active probe)",
+        )
+
+    # Active inference probe
+    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+    payload = {
+        "model": settings.ollama_model,
+        "messages": [{"role": "user", "content": "respond with OK"}],
+        "stream": False,
+        "options": {"num_predict": 5},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                return DependencyDetail(
+                    status=DependencyStatus.ready,
+                    message="Active inference probe succeeded (latency < 5s)",
+                )
+            return DependencyDetail(
+                status=DependencyStatus.unavailable,
+                message=f"Active inference probe returned HTTP {resp.status_code}",
+            )
+    except httpx.TimeoutException:
+        return DependencyDetail(
+            status=DependencyStatus.degraded,
+            message="Active inference probe timed out (cost: 5s timeout exceeded)",
+        )
+    except Exception as exc:
+        return DependencyDetail(
+            status=DependencyStatus.unavailable,
+            message=f"Active inference probe failed: {exc!s}",
         )
 
 
@@ -156,28 +287,51 @@ async def check_ollama(settings: Settings) -> DependencyDetail:
 async def get_ready(
     response: Response,
     settings: Annotated[Settings, Depends(get_settings)],
+    check_inference: bool = False,
 ) -> ReadyResponse:
     """
-    Checks per-dependency status: SQLite, Chroma, sentence-transformers, Ollama.
+    Checks per-dependency status:
+    - ollama_service: reachable HTTP daemon
+    - model_available: configured model present in Ollama tags
+    - model_inference: lightweight ready or active probe (?check_inference=true)
+    - embedding_service: sentence-transformers ready
+    - document_storage: SQLite and Chroma persistence accessible
+    Also provides backward-compatible keys: database, chroma, embedding_model, ollama.
     Sets HTTP 503 if any critical dependency is unavailable, otherwise 200.
     """
-    db_status = check_database(settings)
-    chroma_status = check_chroma(settings)
-    embedding_status = check_embedding_model(settings)
-    ollama_status = await check_ollama(settings)
+    storage_detail, db_detail, chroma_detail = check_document_storage(settings)
+    embedding_detail = check_embedding_service(settings)
+    ollama_service, model_available, ollama_summary = await check_ollama_connectivity(settings)
+    inference_detail = await check_model_inference(
+        settings, model_available.status, probe_inference=check_inference
+    )
 
     dependencies = {
-        "database": db_status,
-        "chroma": chroma_status,
-        "embedding_model": embedding_status,
-        "ollama": ollama_status,
+        # Distinct health states
+        "ollama_service": ollama_service,
+        "model_available": model_available,
+        "model_inference": inference_detail,
+        "embedding_service": embedding_detail,
+        "document_storage": storage_detail,
+        # Backward-compatible keys
+        "database": db_detail,
+        "chroma": chroma_detail,
+        "embedding_model": embedding_detail,
+        "ollama": ollama_summary,
     }
 
-    statuses = [dep.status for dep in dependencies.values()]
-    if DependencyStatus.unavailable in statuses:
+    # Overall calculation: if storage, embedding, or ollama service is unavailable -> 503
+    critical_statuses = [
+        db_detail.status,
+        chroma_detail.status,
+        ollama_service.status,
+    ]
+    if DependencyStatus.unavailable in critical_statuses:
         overall = DependencyStatus.unavailable
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    elif DependencyStatus.degraded in statuses:
+    elif DependencyStatus.degraded in [
+        dep.status for dep in dependencies.values()
+    ] or DependencyStatus.unavailable in [dep.status for dep in dependencies.values()]:
         overall = DependencyStatus.degraded
         response.status_code = status.HTTP_200_OK
     else:
