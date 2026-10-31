@@ -62,7 +62,12 @@ class FakeVectorStore:
             self.records.pop(chunk_id, None)
 
 
-def _insert_ready_document(settings: Settings, document_id: str, filename: str) -> str:
+def _insert_ready_document(
+    settings: Settings,
+    document_id: str,
+    filename: str,
+    content: str = "A remembered passage",
+) -> str:
     initialize_database(settings)
     with connect(settings) as connection:
         connection.execute(
@@ -72,16 +77,23 @@ def _insert_ready_document(settings: Settings, document_id: str, filename: str) 
                 byte_size, status, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, 'ready', datetime('now'), datetime('now'))
             """,
-            (document_id, filename, f"{document_id}.txt", document_id, "txt", 10),
+            (document_id, filename, f"{document_id}.txt", document_id, "txt", len(content)),
         )
-        chunk_id = f"{document_id}:0:0-10"
+        chunk_id = f"{document_id}:0:0-{len(content)}"
         connection.execute(
             """
             INSERT INTO document_chunks (
                 id, document_id, chunk_index, content, start_char, end_char, created_at
-            ) VALUES (?, ?, 0, ?, 0, 10, datetime('now'))
+            ) VALUES (?, ?, 0, ?, 0, ?, datetime('now'))
             """,
-            (chunk_id, document_id, "A remembered passage"),
+            (chunk_id, document_id, content, len(content)),
+        )
+        connection.execute(
+            """
+            INSERT INTO document_chunks_fts (chunk_id, document_id, filename, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (chunk_id, document_id, filename, content),
         )
     return chunk_id
 
@@ -211,3 +223,59 @@ def test_real_semantic_search_survives_new_store_instance(temp_settings: Setting
     assert results
     assert results[0]["document_id"] == document["id"]
     assert "Ashworth" in results[0]["text"]
+
+
+def test_search_scope_isolation_restricts_to_selected_document(temp_settings: Settings) -> None:
+    store = FakeVectorStore()
+    chunk_1 = _insert_ready_document(temp_settings, "doc-a", "alpha.txt")
+    chunk_2 = _insert_ready_document(temp_settings, "doc-b", "beta.txt")
+
+    store.upsert([chunk_1], [[1.0]], ["alpha passage"], [{"document_id": "doc-a"}])
+    store.upsert([chunk_2], [[1.0]], ["beta passage"], [{"document_id": "doc-b"}])
+
+    # Search with document_ids restricted to doc-b
+    results = search_documents(
+        temp_settings,
+        "passage",
+        5,
+        document_ids=["doc-b"],
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=store,
+    )
+
+    assert len(results) == 1
+    assert results[0]["document_id"] == "doc-b"
+    assert results[0]["filename"] == "beta.txt"
+    # Never returns passages from unselected doc-a
+    assert all(r["document_id"] != "doc-a" for r in results)
+
+
+def test_exact_code_identifier_retrieval_survives_low_similarity(
+    temp_settings: Settings,
+) -> None:
+    """Exact code tokens (clc, stem) match via exact lexical path even with low dense sim."""
+    chunk_id = _insert_ready_document(
+        temp_settings,
+        "doc-code",
+        "script.m",
+        content="clc;\nclear;\nclose all;\nstem(ts, xs, 'r', 'filled');",
+    )
+    store = FakeVectorStore()
+    # Distance 0.95 -> Cosine similarity 0.05 (ordinarily below 0.15 threshold)
+    store.upsert([chunk_id], [[0.05]], ["code passage"], [{"document_id": "doc-code"}])
+
+    class LowSimProvider:
+        def embed_query(self, text: str) -> list[float]:
+            return [0.05]
+
+    results = search_documents(
+        temp_settings,
+        "What does clc do?",
+        5,
+        document_ids=["doc-code"],
+        embedding_provider=LowSimProvider(),
+        vector_store=store,
+    )
+    assert len(results) == 1
+    assert results[0]["chunk_id"] == chunk_id
+    assert "clc" in results[0]["text"]
