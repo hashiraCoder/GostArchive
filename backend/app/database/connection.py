@@ -60,5 +60,40 @@ def initialize_database(settings: Settings) -> None:
                 content,
                 tokenize = 'porter unicode61'
             );
+
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                client_turn_id TEXT,
+                role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'failed')),
+                direct_answer TEXT,
+                archive_context TEXT,
+                limitations TEXT,
+                insufficient_evidence INTEGER NOT NULL DEFAULT 0,
+                citations TEXT,
+                retrieval_count INTEGER NOT NULL DEFAULT 0,
+                model TEXT,
+                error_message TEXT,
+                scope_document_ids TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_conversations_updated_at
+                ON conversations(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
+                ON messages(conversation_id, created_at ASC);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_idempotency
+                ON messages(conversation_id, client_turn_id, role)
+                WHERE client_turn_id IS NOT NULL;
             """
         )
