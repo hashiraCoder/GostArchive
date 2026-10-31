@@ -125,3 +125,79 @@ def test_empty_text_returns_422(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_document_filtering_and_pagination(client: TestClient) -> None:
+    # Ingest 3 documents
+    client.post(
+        "/api/documents",
+        files={"file": ("alpha_report.txt", b"Alpha content for research.", "text/plain")},
+    )
+    client.post(
+        "/api/documents",
+        files={"file": ("beta_notes.md", b"# Beta notes about drainage.", "text/markdown")},
+    )
+    client.post(
+        "/api/documents",
+        files={"file": ("gamma_report.txt", b"Gamma report content.", "text/plain")},
+    )
+
+    # Test filename query filter
+    res_query = client.get("/api/documents", params={"query": "report"})
+    assert res_query.status_code == 200
+    assert res_query.json()["total"] == 2
+    filenames = [doc["filename"] for doc in res_query.json()["items"]]
+    assert "alpha_report.txt" in filenames
+    assert "gamma_report.txt" in filenames
+    assert "beta_notes.md" not in filenames
+
+    # Test file_type filter
+    res_md = client.get("/api/documents", params={"file_type": "md"})
+    assert res_md.status_code == 200
+    assert res_md.json()["total"] == 1
+    assert res_md.json()["items"][0]["filename"] == "beta_notes.md"
+
+    # Test status filter
+    res_status = client.get("/api/documents", params={"status": "ready"})
+    assert res_status.status_code == 200
+    assert res_status.json()["total"] == 3
+
+    # Test pagination
+    res_page1 = client.get("/api/documents", params={"limit": 2, "offset": 0})
+    assert res_page1.status_code == 200
+    assert res_page1.json()["total"] == 3
+    assert len(res_page1.json()["items"]) == 2
+
+    res_page2 = client.get("/api/documents", params={"limit": 2, "offset": 2})
+    assert res_page2.status_code == 200
+    assert res_page2.json()["total"] == 3
+    assert len(res_page2.json()["items"]) == 1
+
+
+def test_bulk_deletion(client: TestClient) -> None:
+    d1 = client.post(
+        "/api/documents",
+        files={"file": ("bulk1.txt", b"Content bulk 1", "text/plain")},
+    ).json()["document"]
+    d2 = client.post(
+        "/api/documents",
+        files={"file": ("bulk2.txt", b"Content bulk 2", "text/plain")},
+    ).json()["document"]
+
+    # Delete both + a non-existent ID (partial/idempotent check)
+    res = client.post(
+        "/api/documents/bulk-delete",
+        json={"document_ids": [d1["id"], d2["id"], "non-existent-id"]},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_deleted"] == 3  # All handled idempotently
+    assert len(data["results"]) == 3
+    assert all(r["success"] is True for r in data["results"])
+
+    # Verify they are gone
+    listed = client.get("/api/documents")
+    assert listed.status_code == 200
+    remaining_ids = [doc["id"] for doc in listed.json()["items"]]
+    assert d1["id"] not in remaining_ids
+    assert d2["id"] not in remaining_ids
