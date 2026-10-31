@@ -32,6 +32,11 @@ const statusConfig: Record<
 };
 
 const dependencyNames: Record<string, string> = {
+  ollama_service: "Ollama Daemon",
+  model_available: "Ollama Model",
+  model_inference: "Inference",
+  embedding_service: "Embeddings",
+  document_storage: "Document Storage",
   database: "SQLite DB",
   chroma: "Chroma Store",
   embedding_model: "Embeddings",
@@ -94,6 +99,10 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   }
 
   const { dependencies } = readyData;
+  const keysToDisplay =
+    dependencies.ollama_service && dependencies.model_available
+      ? ["document_storage", "embedding_service", "ollama_service", "model_available"]
+      : ["database", "chroma", "embedding_model", "ollama"];
 
   return (
     <div
@@ -101,10 +110,10 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
       aria-label="System status"
       className="flex flex-wrap items-center gap-2"
     >
-      <DependencyBadge name="database" detail={dependencies.database} />
-      <DependencyBadge name="chroma" detail={dependencies.chroma} />
-      <DependencyBadge name="embedding_model" detail={dependencies.embedding_model} />
-      <DependencyBadge name="ollama" detail={dependencies.ollama} />
+      {keysToDisplay.map((key) => {
+        const detail = dependencies[key];
+        return detail ? <DependencyBadge key={key} name={key} detail={detail} /> : null;
+      })}
     </div>
   );
 };
