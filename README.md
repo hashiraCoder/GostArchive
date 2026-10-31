@@ -110,7 +110,7 @@ flowchart TD
 
 #### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/GhostArchive.git
+git clone https://github.com/hashiraCoder/GostArchive
 cd GhostArchive
 ```
 
