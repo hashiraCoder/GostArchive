@@ -18,6 +18,7 @@ class DocumentResponse(BaseModel):
     chunk_count: int
     created_at: datetime
     updated_at: datetime
+    error_code: str | None = None
 
 
 class DocumentUploadResponse(BaseModel):
@@ -32,3 +33,24 @@ class DocumentListResponse(BaseModel):
 
     items: list[DocumentResponse]
     total: int = Field(ge=0)
+
+
+class BulkDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(min_length=1)
+
+
+class BulkDeleteResultItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    success: bool
+    error: str | None = None
+
+
+class BulkDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    results: list[BulkDeleteResultItem]
+    total_deleted: int = Field(ge=0)
