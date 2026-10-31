@@ -11,6 +11,8 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2_000)
     document_ids: list[str] = Field(default_factory=list)
     top_k: int = Field(default=5, ge=1, le=8)
+    conversation_id: str | None = Field(default=None)
+    client_turn_id: str | None = Field(default=None)
 
     @field_validator("question")
     @classmethod
@@ -44,3 +46,6 @@ class ChatResponse(BaseModel):
     citations: list[Citation]
     retrieval_count: int
     model: str
+    conversation_id: str | None = None
+    message_id: str | None = None
+    client_turn_id: str | None = None
