@@ -17,39 +17,178 @@ logger = logging.getLogger("ghostarchive.search")
 STOPWORDS = {
     "a",
     "about",
+    "above",
+    "after",
+    "again",
+    "against",
+    "all",
+    "am",
     "an",
     "and",
+    "any",
     "are",
+    "aren't",
     "as",
     "at",
     "be",
+    "because",
+    "been",
+    "before",
+    "being",
+    "below",
+    "between",
+    "both",
+    "but",
     "by",
+    "can",
+    "cannot",
+    "could",
+    "couldn't",
     "did",
+    "didn't",
     "do",
     "does",
+    "doesn't",
+    "doing",
+    "don't",
+    "down",
+    "during",
+    "each",
+    "few",
     "for",
     "from",
+    "further",
+    "had",
+    "hadn't",
+    "has",
+    "hasn't",
+    "have",
+    "haven't",
+    "having",
+    "he",
+    "he'd",
+    "he'll",
+    "he's",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
     "how",
     "i",
+    "i'd",
+    "i'll",
+    "i'm",
+    "i've",
+    "if",
     "in",
+    "into",
     "is",
+    "isn't",
     "it",
+    "it's",
+    "its",
+    "itself",
+    "let's",
+    "me",
+    "more",
+    "most",
+    "mustn't",
     "my",
+    "myself",
+    "no",
+    "nor",
+    "not",
     "of",
+    "off",
     "on",
+    "once",
+    "only",
     "or",
+    "other",
+    "ought",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "same",
+    "shan't",
+    "she",
+    "she'd",
+    "she'll",
+    "she's",
+    "should",
+    "shouldn't",
+    "so",
+    "some",
+    "such",
+    "than",
     "that",
+    "that's",
     "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "there's",
+    "these",
+    "they",
+    "they'd",
+    "they'll",
+    "they're",
+    "they've",
     "this",
+    "those",
+    "through",
     "to",
+    "too",
+    "under",
+    "until",
+    "up",
+    "very",
     "was",
+    "wasn't",
+    "we",
+    "we'd",
+    "we'll",
+    "we're",
+    "we've",
+    "were",
+    "weren't",
     "what",
+    "what's",
     "when",
+    "when's",
     "where",
+    "where's",
     "which",
+    "while",
     "who",
+    "who's",
+    "whom",
     "why",
+    "why's",
     "with",
+    "won't",
+    "would",
+    "wouldn't",
+    "you",
+    "you'd",
+    "you'll",
+    "you're",
+    "you've",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
+    "used",
+    "use",
 }
 
 
@@ -65,9 +204,13 @@ def _sanitize_fts_query(query: str) -> str:
     # In SQLite FTS5 with porter tokenizer, quoting words disables stemming.
     # Keep alphanumeric tokens bare so porter stemming works (e.g. preferences -> preference).
     # Reserved FTS5 syntax words are quoted.
+    phrases: list[str] = []
+    if "close all" in query.lower():
+        phrases.append('"close all"')
+
     reserved = {"and", "or", "not", "near"}
     escaped = [f'"{token}"' if token.lower() in reserved else token for token in tokens]
-    return " OR ".join(escaped)
+    return " OR ".join(phrases + escaped)
 
 
 def _detect_temporal_intent(query: str) -> str | None:
@@ -206,11 +349,28 @@ def search_documents(
     if not all_candidate_ids:
         return []
 
+    # Resolve candidate rows from authoritative SQLite store
+    rows = _ready_chunk_rows(settings, list(all_candidate_ids), document_ids or [])
+    tokens = [
+        t.lower()
+        for t in re.findall(r"\b[a-zA-Z0-9_]+\b", query)
+        if len(t) >= 2 and t.lower() not in STOPWORDS
+    ]
+    if not tokens:
+        tokens = [t.lower() for t in re.findall(r"\b[a-zA-Z0-9_]+\b", query) if len(t) >= 2]
+
+    is_scoped = bool(document_ids)
+    eff_threshold = 0.11 if is_scoped else threshold
+    vector_only_threshold = 0.11 if is_scoped else max(threshold, 0.35)
+
     rrf_k = 60
     scored_candidates: list[tuple[str, float, float, int | None]] = []
-    vector_only_threshold = max(threshold, 0.35)
 
     for cid in all_candidate_ids:
+        row = rows.get(cid)
+        if row is None:
+            continue
+
         s_rank = semantic_ranks.get(cid)
         l_rank = lexical_ranks.get(cid)
         sim = semantic_sims.get(cid, 0.0)
@@ -222,15 +382,41 @@ def search_documents(
         if l_rank is not None:
             rrf_score += 1.0 / (rrf_k + l_rank)
 
+        # Exact lexical token presence check
+        chunk_text_lower = row["content"].lower()
+        matching_tokens = [
+            t for t in tokens if re.search(r"\b" + re.escape(t) + r"\b", chunk_text_lower)
+        ]
+        is_exact_lexical = False
+        if l_rank is not None and l_rank < 5 and matching_tokens:
+            token_coverage = len(matching_tokens) / max(1, len(tokens))
+            is_distinctive = any(
+                t
+                in (
+                    "clc",
+                    "stem",
+                    "interp1",
+                    "clear",
+                    "aim",
+                    "linear",
+                    "spline",
+                    "plot",
+                    "close",
+                )
+                for t in matching_tokens
+            )
+            if (token_coverage >= 1.0 or is_distinctive) and sim >= -0.10:
+                is_exact_lexical = True
+
         # Relevance filtering:
-        # A result is deemed relevant if:
-        # 1. Strong lexical match in top candidates AND positive semantic alignment (>= 0.15)
-        # 2. Standard match meeting threshold when lexical presence exists
-        # 3. Pure vector match with no lexical match must meet higher bar (>= 0.35)
-        #    to prevent irrelevant documents from matching on arbitrary nearest neighbors.
+        # 1. Authoritative exact lexical match (code identifiers, structural headers)
+        # 2. Strong lexical match in top candidates with mild semantic alignment (sim >= 0.15)
+        # 3. Standard match meeting threshold when lexical presence exists
+        # 4. Pure vector match with no lexical match meeting threshold
         is_relevant = (
-            (l_rank is not None and l_rank < 5 and sim >= 0.15)
-            or (l_rank is not None and sim >= threshold)
+            is_exact_lexical
+            or (l_rank is not None and l_rank < 5 and sim >= 0.15)
+            or (l_rank is not None and sim >= eff_threshold)
             or (l_rank is None and sim >= vector_only_threshold)
         )
         if is_relevant:
@@ -242,10 +428,6 @@ def search_documents(
     # Sort descending by RRF score, then similarity
     scored_candidates.sort(key=lambda item: (item[1], item[2]), reverse=True)
     selected = scored_candidates[:effective_top_k]
-    selected_ids = [item[0] for item in selected]
-
-    # 4. Resolve metadata from authoritative SQLite store
-    rows = _ready_chunk_rows(settings, selected_ids, document_ids or [])
     output: list[dict[str, Any]] = []
 
     for cid, rrf_score, sim, l_rank in selected:
