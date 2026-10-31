@@ -70,19 +70,70 @@ def insert_document(
     )
 
 
-def list_documents(connection: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Return document metadata with chunk counts."""
-    return list(
-        connection.execute(
-            """
-            SELECT d.*, COUNT(c.id) AS chunk_count
-            FROM documents AS d
-            LEFT JOIN document_chunks AS c ON c.document_id = d.id
-            GROUP BY d.id
-            ORDER BY d.created_at DESC
-            """
-        ).fetchall()
-    )
+def count_documents(
+    connection: sqlite3.Connection,
+    *,
+    query: str | None = None,
+    status: str | None = None,
+    file_type: str | None = None,
+) -> int:
+    """Return total number of documents matching the filters."""
+    where_clauses: list[str] = []
+    params: list[Any] = []
+    if query:
+        where_clauses.append("(d.original_filename LIKE ? OR d.title LIKE ?)")
+        params.extend([f"%{query}%", f"%{query}%"])
+    if status:
+        where_clauses.append("d.status = ?")
+        params.append(status)
+    if file_type:
+        where_clauses.append("d.file_type = ?")
+        params.append(file_type.lower().lstrip("."))
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    sql = f"SELECT COUNT(*) FROM documents AS d {where_sql}"
+    row = connection.execute(sql, params).fetchone()
+    return int(row[0]) if row else 0
+
+
+def list_documents(
+    connection: sqlite3.Connection,
+    *,
+    query: str | None = None,
+    status: str | None = None,
+    file_type: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    """Return document metadata with chunk counts and optional filters/pagination."""
+    where_clauses: list[str] = []
+    params: list[Any] = []
+    if query:
+        where_clauses.append("(d.original_filename LIKE ? OR d.title LIKE ?)")
+        params.extend([f"%{query}%", f"%{query}%"])
+    if status:
+        where_clauses.append("d.status = ?")
+        params.append(status)
+    if file_type:
+        where_clauses.append("d.file_type = ?")
+        params.append(file_type.lower().lstrip("."))
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    pagination_sql = ""
+    if limit is not None:
+        pagination_sql = "LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+    sql = f"""
+        SELECT d.*, COUNT(c.id) AS chunk_count
+        FROM documents AS d
+        LEFT JOIN document_chunks AS c ON c.document_id = d.id
+        {where_sql}
+        GROUP BY d.id
+        ORDER BY d.created_at DESC
+        {pagination_sql}
+    """
+    return list(connection.execute(sql, params).fetchall())
 
 
 def get_document(connection: sqlite3.Connection, document_id: str) -> sqlite3.Row | None:
