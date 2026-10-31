@@ -18,10 +18,14 @@ interface SearchResponse {
   total: number;
 }
 
-export function searchDocuments(query: string): Promise<SearchResponse> {
+export function searchDocuments(query: string, documentIds?: string[]): Promise<SearchResponse> {
+  const payload: Record<string, unknown> = { query, top_k: 5 };
+  if (documentIds && documentIds.length > 0) {
+    payload.document_ids = documentIds;
+  }
   return apiFetch<SearchResponse>("/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, top_k: 5 }),
+    body: JSON.stringify(payload),
   });
 }
