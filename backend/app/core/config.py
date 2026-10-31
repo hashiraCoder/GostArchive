@@ -11,7 +11,7 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
 
     # ── Data directory (runtime; must be gitignored) ─────────────────────────
-    data_dir: Path = Path("backend/data")
+    data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[2] / "data")
 
     # ── Upload limits ────────────────────────────────────────────────────────
     upload_max_bytes: int = 5_242_880  # 5 MiB
@@ -66,6 +66,18 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ── Validators ───────────────────────────────────────────────────────────
+    @field_validator("data_dir", mode="after")
+    @classmethod
+    def resolve_data_dir(cls, v: Path) -> Path:
+        if not v.is_absolute():
+            project_root = Path(__file__).resolve().parents[3]
+            # If path refers to 'backend/data' or similar under project root
+            candidate = (project_root / v).resolve()
+            if candidate.name == "data":
+                return candidate
+            return (Path(__file__).resolve().parents[2] / v).resolve()
+        return v
+
     @field_validator("retrieval_top_k")
     @classmethod
     def clamp_top_k(cls, v: int) -> int:
