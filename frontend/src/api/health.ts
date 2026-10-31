@@ -22,6 +22,12 @@ export interface ReadyResponse {
     chroma: DependencyDetail;
     embedding_model: DependencyDetail;
     ollama: DependencyDetail;
+    ollama_service?: DependencyDetail;
+    model_available?: DependencyDetail;
+    model_inference?: DependencyDetail;
+    embedding_service?: DependencyDetail;
+    document_storage?: DependencyDetail;
+    [key: string]: DependencyDetail | undefined;
   };
 }
 
