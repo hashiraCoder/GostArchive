@@ -132,3 +132,5 @@ docs/evaluation_results_local.json
 *.tmp
 *.temp
 .python-version
+ai_md
+docs
